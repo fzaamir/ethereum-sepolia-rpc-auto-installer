@@ -1,6 +1,5 @@
 # ✨ Ethereum Sepolia RPC Auto-Installer
 
-![Ethereum Logo](https://cryptologos.cc/logos/ethereum-eth-logo.png?v=025)
 **Automated Geth + Prysm Node Deployment**
 
 ---
