@@ -22,7 +22,7 @@ print_banner() {
   echo "██╔══╝   ███╔╝      ██╔══██║    ██╔══██║██║╚██╔╝██║██║██╔══██╗"
   echo "██║     ███████╗    ██║  ██║    ██║  ██║██║ ╚═╝ ██║██║██║  ██║"
   echo "╚═╝     ╚══════╝    ╚═╝  ╚═╝    ╚═╝  ╚═╝╚═╝     ╚═╝╚═╝╚═╝  ╚═╝"
-  echo -e "${CYAN}                   🚀 POWERED BY: FZ AAMIR 💻${NC}\n"
+  echo -e "${CYAN}                   🚀 POWERED BY: FZ_AAMIR 💻${NC}\n"
 }
 
 install_dependencies() {
