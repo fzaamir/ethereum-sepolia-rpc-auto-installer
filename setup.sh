@@ -1,6 +1,7 @@
 #!/bin/bash
 
 set -euo pipefail
+trap 'echo -e "\033[1;31m❌ Error occurred at line $LINENO. Exiting.\033[0m"' ERR
 
 GREEN="\033[1;32m"
 BLUE="\033[1;34m"
@@ -8,8 +9,6 @@ YELLOW="\033[1;33m"
 CYAN="\033[1;36m"
 RED="\033[1;31m"
 NC="\033[0m"
-
-trap 'echo -e "${RED}❌ Error occurred at line $LINENO. Exiting.${NC}"' ERR
 
 BASE_DIR="/opt/eth-rpc-node"
 JWT_PATH="$BASE_DIR/jwt.hex"
@@ -31,14 +30,17 @@ install_dependencies() {
   apt update -y && apt upgrade -y
   local packages=(curl jq net-tools iptables build-essential git wget lz4 make gcc nano automake autoconf tmux htop nvme-cli libgbm1 pkg-config libssl-dev libleveldb-dev tar clang bsdmainutils ncdu unzip ufw)
   for pkg in "${packages[@]}"; do
-    dpkg -s "$pkg" >/dev/null 2>&1 || apt-get install -y "$pkg"
+    if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+      apt-get install -y "$pkg"
+      echo -e "${GREEN}✅ Installed $pkg${NC}"
+    fi
   done
 }
 
 install_docker() {
   if ! command -v docker &>/dev/null; then
     echo -e "${CYAN}🐳 Installing Docker Engine...${NC}"
-    apt-get remove docker docker-engine docker.io containerd runc -y
+    apt-get remove docker docker-engine docker.io containerd runc -y || true
     apt-get install -y ca-certificates gnupg
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -48,6 +50,9 @@ install_docker() {
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     systemctl enable docker
     systemctl restart docker
+    echo -e "${GREEN}✅ Docker installed${NC}"
+  else
+    echo -e "${CYAN}ℹ️ Docker already installed. Skipping.${NC}"
   fi
 }
 
@@ -59,9 +64,11 @@ check_ports() {
     echo -e "${RED}❌ Ports in use. Please resolve conflicts:\n$conflicts${NC}"
     exit 1
   fi
+  echo -e "${GREEN}✅ Required ports are free.${NC}"
 }
 
 create_directories() {
+  set +u
   echo -e "${YELLOW}📁 Creating data directories...${NC}"
 
   if [ -d "$BASE_DIR/execution" ]; then
@@ -75,14 +82,21 @@ create_directories() {
   fi
 
   mkdir -p "$BASE_DIR/execution" "$BASE_DIR/consensus"
+  echo -e "${GREEN}✅ Directories recreated.${NC}"
 
   if [ -f "$JWT_PATH" ]; then
     echo -e "${CYAN}ℹ️ Deleting existing JWT secret...${NC}"
     rm -f "$JWT_PATH"
   fi
 
+  if ! command -v openssl >/dev/null 2>&1; then
+    echo -e "${RED}❌ OpenSSL is not installed. Aborting.${NC}"
+    exit 1
+  fi
+
   openssl rand -hex 32 > "$JWT_PATH"
-  echo -e "${GREEN}✅ Directories created and JWT regenerated.${NC}"
+  echo -e "${GREEN}✅ JWT secret generated.${NC}"
+  set -u
 }
 
 write_compose_file() {
@@ -144,12 +158,14 @@ services:
       - --checkpoint-sync-url=https://checkpoint-sync.sepolia.ethpandaops.io
       - --genesis-beacon-api-url=https://checkpoint-sync.sepolia.ethpandaops.io
 EOF
+  echo -e "${GREEN}✅ docker-compose.yml written.${NC}"
 }
 
 start_services() {
   echo -e "${CYAN}🚀 Starting Ethereum Sepolia services...${NC}"
   cd "$BASE_DIR"
   docker compose up -d
+  echo -e "${GREEN}✅ Services started.${NC}"
 }
 
 monitor_sync() {
