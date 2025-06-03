@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
 GREEN="\033[1;32m"
 BLUE="\033[1;34m"
@@ -8,6 +8,8 @@ YELLOW="\033[1;33m"
 CYAN="\033[1;36m"
 RED="\033[1;31m"
 NC="\033[0m"
+
+trap 'echo -e "${RED}❌ Error occurred at line $LINENO. Exiting.${NC}"' ERR
 
 BASE_DIR="/opt/eth-rpc-node"
 JWT_PATH="$BASE_DIR/jwt.hex"
@@ -61,8 +63,26 @@ check_ports() {
 
 create_directories() {
   echo -e "${YELLOW}📁 Creating data directories...${NC}"
+
+  if [ -d "$BASE_DIR/execution" ]; then
+    echo -e "${CYAN}ℹ️ Deleting existing execution directory...${NC}"
+    rm -rf "$BASE_DIR/execution"
+  fi
+
+  if [ -d "$BASE_DIR/consensus" ]; then
+    echo -e "${CYAN}ℹ️ Deleting existing consensus directory...${NC}"
+    rm -rf "$BASE_DIR/consensus"
+  fi
+
   mkdir -p "$BASE_DIR/execution" "$BASE_DIR/consensus"
-  [ ! -f "$JWT_PATH" ] && openssl rand -hex 32 > "$JWT_PATH"
+
+  if [ -f "$JWT_PATH" ]; then
+    echo -e "${CYAN}ℹ️ Deleting existing JWT secret...${NC}"
+    rm -f "$JWT_PATH"
+  fi
+
+  openssl rand -hex 32 > "$JWT_PATH"
+  echo -e "${GREEN}✅ Directories created and JWT regenerated.${NC}"
 }
 
 write_compose_file() {
