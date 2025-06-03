@@ -202,7 +202,7 @@ print_endpoints() {
   echo -e "${CYAN}\n🔗 Your Ethereum Sepolia RPC Endpoints:${NC}"
   echo -e "${GREEN}📎 Execution (Geth):    ETH     http://$ip:8545${NC}"
   echo -e "${GREEN}📎 Consensus (Prysm):   BEACON  http://$ip:3500${NC}"
-  echo -e "${BLUE}\n🎉 Setup completed successfully — Powered by FZ AAMIR ✨${NC}"
+  echo -e "${BLUE}\n🎉 Setup completed successfully — Powered by FZ_AAMIR ✨${NC}"
 }
 
 main() {
