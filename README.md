@@ -67,4 +67,4 @@ Open to PRs, issues, and forks! Submit your ideas or improvements anytime.
 ---
 
 
-Made with 🛠️ by contributors who love Ethereum.
+Made with ❤️ by Aamir — Discord: fz_aamir  |  ETH Lover 💎
