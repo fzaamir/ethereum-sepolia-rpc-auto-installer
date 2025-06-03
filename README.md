@@ -7,12 +7,19 @@
 ## 🔥 Features
 
 ✅ One-command setup
+
 📦 Geth (Execution Layer) node
+
 🛰️ Prysm (Consensus Layer) node
+
 🔐 Secure JWT auth generation
+
 🌐 Local & external RPC endpoints
+
 📊 Real-time sync progress tracking
+
 🛡️ Port conflict detection
+
 🐳 Fully Docker-based, dependency-aware
 
 ---
