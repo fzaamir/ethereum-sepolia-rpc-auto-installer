@@ -102,7 +102,6 @@ create_directories() {
 write_compose_file() {
   echo -e "${YELLOW}📝 Writing docker-compose.yml...${NC}"
   cat > "$BASE_DIR/docker-compose.yml" <<EOF
-version: '3.8'
 services:
   execution:
     image: ethereum/client-go:stable
