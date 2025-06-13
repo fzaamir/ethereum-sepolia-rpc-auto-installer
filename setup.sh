@@ -29,8 +29,9 @@ print_banner() {
   echo "==============================${NC}"
   echo "1) 🚀 Install & Start Node"
   echo "2) 📜 View Logs"
-  echo "3) ❌ Exit"
-  echo -n "Choose an option [1-3]: "
+  echo "3) 📶 Check Node Status"
+  echo "4) ❌ Exit"
+  echo -n "Choose an option [1-4]: "
 }
 
 install_dependencies() {
@@ -79,13 +80,11 @@ create_directories() {
   echo -e "${YELLOW}📁 Creating data directories...${NC}"
   rm -rf "$BASE_DIR/execution" "$BASE_DIR/consensus"
   mkdir -p "$BASE_DIR/execution" "$BASE_DIR/consensus"
-
   rm -f "$JWT_PATH"
   if ! command -v openssl >/dev/null 2>&1; then
     echo -e "${RED}❌ OpenSSL not found. Aborting.${NC}"
     exit 1
   fi
-
   openssl rand -hex 32 > "$JWT_PATH"
   echo -e "${GREEN}✅ JWT secret created.${NC}"
 }
@@ -195,6 +194,30 @@ print_endpoints() {
   echo -e "${BLUE}\n🎉 Setup complete — Powered by FZ_AAMIR ✨${NC}"
 }
 
+check_node_status() {
+  echo -e "${CYAN}🔍 Checking Ethereum Sepolia node status...${NC}"
+  local geth_sync=$(curl -s -X POST -H "Content-Type: application/json" \
+    --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' http://$IP_ADDR:8545)
+  local prysm_sync=$(curl -s http://$IP_ADDR:3500/eth/v1/node/syncing)
+  echo ""
+  if [[ "$geth_sync" == *"false"* ]]; then
+    echo -e "✅ ${GREEN}Geth (Execution Layer) is fully synced.${NC}"
+  else
+    local current=$(echo "$geth_sync" | jq -r .result.currentBlock)
+    local highest=$(echo "$geth_sync" | jq -r .result.highestBlock)
+    local percent=$(awk "BEGIN {printf \"%.2f\", (0x${current}/0x${highest})*100}")
+    echo -e "🔄 ${YELLOW}Geth is syncing: Block $current of $highest (~$percent%)${NC}"
+  fi
+  local distance=$(echo "$prysm_sync" | jq -r '.data.sync_distance')
+  local head=$(echo "$prysm_sync" | jq -r '.data.head_slot')
+  if [[ "$distance" == "0" ]]; then
+    echo -e "✅ ${GREEN}Prysm (Consensus Layer) is fully synced.${NC}"
+  else
+    echo -e "🔄 ${YELLOW}Prysm is syncing: $distance slots behind (head: $head)${NC}"
+  fi
+  echo ""
+}
+
 handle_choice() {
   case "$1" in
     1)
@@ -217,11 +240,14 @@ handle_choice() {
       fi
       ;;
     3)
+      check_node_status
+      ;;
+    4)
       echo -e "${CYAN}👋 Goodbye!${NC}"
       exit 0
       ;;
     *)
-      echo -e "${RED}❌ Invalid input. Enter 1, 2, or 3.${NC}"
+      echo -e "${RED}❌ Invalid input. Enter 1, 2, 3, or 4.${NC}"
       ;;
   esac
 }
