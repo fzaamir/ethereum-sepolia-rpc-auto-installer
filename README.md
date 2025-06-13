@@ -36,7 +36,8 @@
 ## 🚀 Quick Start
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fzaamir/ethereum-sepolia-rpc-auto-installer/main/setup.sh | bash
+bash <(curl -fsSL https://raw.githubusercontent.com/fzaamir/ethereum-sepolia-rpc-auto-installer/main/setup.sh)
+
 ```
 
 📦 This will:
