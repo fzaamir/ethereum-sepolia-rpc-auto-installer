@@ -23,7 +23,7 @@ print_banner() {
   echo "██╔══╝   ███╔╝      ██╔══██║    ██╔══██║██║╚██╔╝██║██║██╔══██╗"
   echo "██║     ███████╗    ██║  ██║    ██║  ██║██║ ╚═╝ ██║██║██║  ██║"
   echo "╚═╝     ╚══════╝    ╚═╝  ╚═╝    ╚═╝  ╚═╝╚═╝     ╚═╝╚═╝╚═╝  ╚═╝"
-  echo -e "${CYAN}                   🚀 POWERED BY: FZ_AAMIR 💻${NC}\n"
+  echo -e "${CYAN}                   🚀 POWERED BY: FZ_AAMIR 💻${NC}"
   echo -e "${BLUE}=============================="
   echo " Ethereum Sepolia Node Menu"
   echo -e "==============================${NC}"
@@ -31,9 +31,8 @@ print_banner() {
   echo "2) 📜 View Logs"
   echo "3) 📶 Check Node Status"
   echo "4) ❌ Exit"
-  echo -n "Choose an option [1-4]: "
+  echo -en "${NC}Choose an option [1-4]: "
 }
-
 
 install_dependencies() {
   echo -e "${YELLOW}🔧 Installing required packages...${NC}"
