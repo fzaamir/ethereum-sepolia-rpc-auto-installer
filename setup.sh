@@ -12,6 +12,7 @@ NC="\033[0m"
 
 BASE_DIR="/opt/eth-rpc-node"
 JWT_PATH="$BASE_DIR/jwt.hex"
+IP_ADDR="$(curl -s ifconfig.me)"
 
 print_banner() {
   clear
@@ -79,30 +80,12 @@ check_ports() {
 create_directories() {
   set +u
   echo -e "${YELLOW}📁 Creating data directories...${NC}"
-
-  if [ -d "$BASE_DIR/execution" ]; then
-    echo -e "${CYAN}ℹ️ Deleting existing execution directory...${NC}"
-    rm -rf "$BASE_DIR/execution"
-  fi
-
-  if [ -d "$BASE_DIR/consensus" ]; then
-    echo -e "${CYAN}ℹ️ Deleting existing consensus directory...${NC}"
-    rm -rf "$BASE_DIR/consensus"
-  fi
-
+  rm -rf "$BASE_DIR/execution" "$BASE_DIR/consensus"
   mkdir -p "$BASE_DIR/execution" "$BASE_DIR/consensus"
   echo -e "${GREEN}✅ Directories recreated.${NC}"
 
-  if [ -f "$JWT_PATH" ]; then
-    echo -e "${CYAN}ℹ️ Deleting existing JWT secret...${NC}"
-    rm -f "$JWT_PATH"
-  fi
-
-  if ! command -v openssl >/dev/null 2>&1; then
-    echo -e "${RED}❌ OpenSSL is not installed. Aborting.${NC}"
-    exit 1
-  fi
-
+  [ -f "$JWT_PATH" ] && rm -f "$JWT_PATH"
+  command -v openssl >/dev/null 2>&1 || { echo -e "${RED}❌ OpenSSL is not installed. Aborting.${NC}"; exit 1; }
   openssl rand -hex 32 > "$JWT_PATH"
   echo -e "${GREEN}✅ JWT secret generated.${NC}"
   set -u
@@ -157,7 +140,7 @@ services:
       - --datadir=/data
       - --disable-monitoring
       - --rpc-host=0.0.0.0
-      - --execution-endpoint=http://127.0.0.1:8551
+      - --execution-endpoint=http://$IP_ADDR:8551
       - --jwt-secret=/data/jwt.hex
       - --rpc-port=4000
       - --grpc-gateway-host=0.0.0.0
@@ -180,8 +163,8 @@ monitor_sync() {
   echo -e "${CYAN}📡 Syncing Geth & Prysm... Please wait.${NC}"
   while true; do
     local geth_sync=$(curl -s -X POST -H "Content-Type: application/json" \
-      --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' http://localhost:8545)
-    local prysm_sync=$(curl -s http://localhost:3500/eth/v1/node/syncing)
+      --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' http://$IP_ADDR:8545)
+    local prysm_sync=$(curl -s http://$IP_ADDR:3500/eth/v1/node/syncing)
 
     if [[ "$geth_sync" == *"false"* ]]; then
       echo -e "${GREEN}✅ Geth (Execution Layer) is fully synced and ready.${NC}"
@@ -189,13 +172,10 @@ monitor_sync() {
       local current_hex=$(echo "$geth_sync" | jq -r .result.currentBlock)
       local highest_hex=$(echo "$geth_sync" | jq -r .result.highestBlock)
 
-      local current_dec=0
-      local highest_dec=0
-
-      if [[ "$current_hex" =~ ^0x ]]; then current_dec=$((current_hex)); fi
-      if [[ "$highest_hex" =~ ^0x ]]; then highest_dec=$((highest_hex)); fi
-
+      local current_dec=$((current_hex))
+      local highest_dec=$((highest_hex))
       local percent="0.00"
+
       if [ "$highest_dec" -gt 0 ]; then
         percent=$(awk "BEGIN {printf \"%.2f\", ($current_dec/$highest_dec)*100}")
       fi
@@ -218,10 +198,9 @@ monitor_sync() {
 }
 
 print_endpoints() {
-  local ip=$(curl -s ifconfig.me)
   echo -e "${CYAN}\n🔗 Your Ethereum Sepolia RPC Endpoints:${NC}"
-  echo -e "${GREEN}📎 Execution (Geth):    ETH     http://$ip:8545${NC}"
-  echo -e "${GREEN}📎 Consensus (Prysm):   BEACON  http://$ip:3500${NC}"
+  echo -e "${GREEN}📎 Execution (Geth):    ETH     http://$IP_ADDR:8545${NC}"
+  echo -e "${GREEN}📎 Consensus (Prysm):   BEACON  http://$IP_ADDR:3500${NC}"
   echo -e "${BLUE}\n🎉 Setup completed successfully — Powered by FZ_AAMIR ✨${NC}"
 }
 
