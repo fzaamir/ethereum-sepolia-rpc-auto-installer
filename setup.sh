@@ -12,7 +12,7 @@ NC="\033[0m"
 
 BASE_DIR="/opt/eth-rpc-node"
 JWT_PATH="$BASE_DIR/jwt.hex"
-IP_ADDR="$(curl -s ifconfig.me)"
+IP_ADDR="$(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
 
 print_banner() {
   clear
@@ -24,11 +24,9 @@ print_banner() {
   echo "██║     ███████╗    ██║  ██║    ██║  ██║██║ ╚═╝ ██║██║██║  ██║"
   echo "╚═╝     ╚══════╝    ╚═╝  ╚═╝    ╚═╝  ╚═╝╚═╝     ╚═╝╚═╝╚═╝  ╚═╝"
   echo -e "${CYAN}                   🚀 POWERED BY: FZ_AAMIR 💻${NC}\n"
-  echo -e "${BLUE}"
-  echo "=============================="
+  echo -e "${BLUE}=============================="
   echo " Ethereum Sepolia Node Menu"
-  echo "=============================="
-  echo -e "${NC}"
+  echo "==============================${NC}"
   echo "1) 🚀 Install & Start Node"
   echo "2) 📜 View Logs"
   echo "3) ❌ Exit"
@@ -36,7 +34,7 @@ print_banner() {
 }
 
 install_dependencies() {
-  echo -e "${YELLOW}🔧 Installing required packages... 🧰${NC}"
+  echo -e "${YELLOW}🔧 Installing required packages...${NC}"
   apt update -y && apt upgrade -y
   local packages=(curl jq net-tools iptables build-essential git wget lz4 make gcc nano automake autoconf tmux htop nvme-cli libgbm1 pkg-config libssl-dev libleveldb-dev tar clang bsdmainutils ncdu unzip ufw)
   for pkg in "${packages[@]}"; do
@@ -49,7 +47,7 @@ install_dependencies() {
 
 install_docker() {
   if ! command -v docker &>/dev/null; then
-    echo -e "${CYAN}🐳 Installing Docker Engine...${NC}"
+    echo -e "${CYAN}🐳 Installing Docker...${NC}"
     apt-get remove docker docker-engine docker.io containerd runc -y || true
     apt-get install -y ca-certificates gnupg
     install -m 0755 -d /etc/apt/keyrings
@@ -78,17 +76,18 @@ check_ports() {
 }
 
 create_directories() {
-  set +u
   echo -e "${YELLOW}📁 Creating data directories...${NC}"
   rm -rf "$BASE_DIR/execution" "$BASE_DIR/consensus"
   mkdir -p "$BASE_DIR/execution" "$BASE_DIR/consensus"
-  echo -e "${GREEN}✅ Directories recreated.${NC}"
 
-  [ -f "$JWT_PATH" ] && rm -f "$JWT_PATH"
-  command -v openssl >/dev/null 2>&1 || { echo -e "${RED}❌ OpenSSL is not installed. Aborting.${NC}"; exit 1; }
+  rm -f "$JWT_PATH"
+  if ! command -v openssl >/dev/null 2>&1; then
+    echo -e "${RED}❌ OpenSSL not found. Aborting.${NC}"
+    exit 1
+  fi
+
   openssl rand -hex 32 > "$JWT_PATH"
-  echo -e "${GREEN}✅ JWT secret generated.${NC}"
-  set -u
+  echo -e "${GREEN}✅ JWT secret created.${NC}"
 }
 
 write_compose_file() {
@@ -149,7 +148,7 @@ services:
       - --checkpoint-sync-url=https://checkpoint-sync.sepolia.ethpandaops.io
       - --genesis-beacon-api-url=https://checkpoint-sync.sepolia.ethpandaops.io
 EOF
-  echo -e "${GREEN}✅ docker-compose.yml written.${NC}"
+  echo -e "${GREEN}✅ Compose file created.${NC}"
 }
 
 start_services() {
@@ -160,36 +159,28 @@ start_services() {
 }
 
 monitor_sync() {
-  echo -e "${CYAN}📡 Syncing Geth & Prysm... Please wait.${NC}"
+  echo -e "${CYAN}📡 Monitoring sync status...${NC}"
   while true; do
     local geth_sync=$(curl -s -X POST -H "Content-Type: application/json" \
       --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' http://$IP_ADDR:8545)
     local prysm_sync=$(curl -s http://$IP_ADDR:3500/eth/v1/node/syncing)
 
     if [[ "$geth_sync" == *"false"* ]]; then
-      echo -e "${GREEN}✅ Geth (Execution Layer) is fully synced and ready.${NC}"
+      echo -e "${GREEN}✅ Geth fully synced.${NC}"
     else
-      local current_hex=$(echo "$geth_sync" | jq -r .result.currentBlock)
-      local highest_hex=$(echo "$geth_sync" | jq -r .result.highestBlock)
-
-      local current_dec=$((current_hex))
-      local highest_dec=$((highest_hex))
-      local percent="0.00"
-
-      if [ "$highest_dec" -gt 0 ]; then
-        percent=$(awk "BEGIN {printf \"%.2f\", ($current_dec/$highest_dec)*100}")
-      fi
-
-      echo -e "${YELLOW}🔄 Geth is syncing: Block $current_hex of $highest_hex (~$percent%)${NC}"
+      local current=$(echo "$geth_sync" | jq -r .result.currentBlock)
+      local highest=$(echo "$geth_sync" | jq -r .result.highestBlock)
+      local percent=$(awk "BEGIN {printf \"%.2f\", (0x${current}/0x${highest})*100}")
+      echo -e "${YELLOW}🔄 Geth syncing: Block $current of $highest (~$percent%)${NC}"
     fi
 
     local distance=$(echo "$prysm_sync" | jq -r '.data.sync_distance')
     local head=$(echo "$prysm_sync" | jq -r '.data.head_slot')
 
     if [[ "$distance" == "0" ]]; then
-      echo -e "${GREEN}✅ Prysm (Consensus Layer) is fully synced and ready.${NC}"
+      echo -e "${GREEN}✅ Prysm fully synced.${NC}"
     else
-      echo -e "${YELLOW}🔄 Prysm is syncing: $distance slots behind (current slot: $head)${NC}"
+      echo -e "${YELLOW}🔄 Prysm syncing: $distance slots behind (head: $head)${NC}"
     fi
 
     [[ "$geth_sync" == *"false"* && "$distance" == "0" ]] && break
@@ -198,10 +189,10 @@ monitor_sync() {
 }
 
 print_endpoints() {
-  echo -e "${CYAN}\n🔗 Your Ethereum Sepolia RPC Endpoints:${NC}"
-  echo -e "${GREEN}📎 Execution (Geth):    ETH     http://$IP_ADDR:8545${NC}"
-  echo -e "${GREEN}📎 Consensus (Prysm):   BEACON  http://$IP_ADDR:3500${NC}"
-  echo -e "${BLUE}\n🎉 Setup completed successfully — Powered by FZ_AAMIR ✨${NC}"
+  echo -e "${CYAN}\n🔗 Ethereum Sepolia RPC Endpoints:${NC}"
+  echo -e "${GREEN}📎 Geth:     http://$IP_ADDR:8545${NC}"
+  echo -e "${GREEN}📎 Prysm:    http://$IP_ADDR:3500${NC}"
+  echo -e "${BLUE}\n🎉 Setup complete — Powered by FZ_AAMIR ✨${NC}"
 }
 
 handle_choice() {
@@ -219,7 +210,7 @@ handle_choice() {
     2)
       if [ -f "$BASE_DIR/docker-compose.yml" ]; then
         cd "$BASE_DIR"
-        echo -e "${YELLOW}📜 Showing logs... Press Ctrl+C to exit.${NC}"
+        echo -e "${YELLOW}📜 Showing logs... Ctrl+C to exit.${NC}"
         docker compose logs -f
       else
         echo -e "${RED}❌ No docker-compose.yml found. Please run installation first.${NC}"
@@ -230,7 +221,7 @@ handle_choice() {
       exit 0
       ;;
     *)
-      echo -e "${RED}❌ Invalid choice. Please enter 1, 2, or 3.${NC}"
+      echo -e "${RED}❌ Invalid input. Enter 1, 2, or 3.${NC}"
       ;;
   esac
 }
