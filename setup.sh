@@ -23,6 +23,15 @@ print_banner() {
   echo "██║     ███████╗    ██║  ██║    ██║  ██║██║ ╚═╝ ██║██║██║  ██║"
   echo "╚═╝     ╚══════╝    ╚═╝  ╚═╝    ╚═╝  ╚═╝╚═╝     ╚═╝╚═╝╚═╝  ╚═╝"
   echo -e "${CYAN}                   🚀 POWERED BY: FZ_AAMIR 💻${NC}\n"
+  echo -e "${BLUE}"
+  echo "=============================="
+  echo " Ethereum Sepolia Node Menu"
+  echo "=============================="
+  echo -e "${NC}"
+  echo "1) 🚀 Install & Start Node"
+  echo "2) 📜 View Logs"
+  echo "3) ❌ Exit"
+  echo -n "Choose an option [1-3]: "
 }
 
 install_dependencies() {
@@ -177,17 +186,29 @@ monitor_sync() {
     if [[ "$geth_sync" == *"false"* ]]; then
       echo -e "${GREEN}✅ Geth (Execution Layer) is fully synced and ready.${NC}"
     else
-      local current=$(echo "$geth_sync" | jq -r .result.currentBlock)
-      local highest=$(echo "$geth_sync" | jq -r .result.highestBlock)
-      local percent=$(awk "BEGIN {printf \"%.2f\", ($current/$highest)*100}")
-      echo -e "${YELLOW}🔄 Geth is syncing: Block $current of $highest (~$percent%)${NC}"
+      local current_hex=$(echo "$geth_sync" | jq -r .result.currentBlock)
+      local highest_hex=$(echo "$geth_sync" | jq -r .result.highestBlock)
+
+      local current_dec=0
+      local highest_dec=0
+
+      if [[ "$current_hex" =~ ^0x ]]; then current_dec=$((current_hex)); fi
+      if [[ "$highest_hex" =~ ^0x ]]; then highest_dec=$((highest_hex)); fi
+
+      local percent="0.00"
+      if [ "$highest_dec" -gt 0 ]; then
+        percent=$(awk "BEGIN {printf \"%.2f\", ($current_dec/$highest_dec)*100}")
+      fi
+
+      echo -e "${YELLOW}🔄 Geth is syncing: Block $current_hex of $highest_hex (~$percent%)${NC}"
     fi
 
     local distance=$(echo "$prysm_sync" | jq -r '.data.sync_distance')
+    local head=$(echo "$prysm_sync" | jq -r '.data.head_slot')
+
     if [[ "$distance" == "0" ]]; then
       echo -e "${GREEN}✅ Prysm (Consensus Layer) is fully synced and ready.${NC}"
     else
-      local head=$(echo "$prysm_sync" | jq -r '.data.head_slot')
       echo -e "${YELLOW}🔄 Prysm is syncing: $distance slots behind (current slot: $head)${NC}"
     fi
 
@@ -204,16 +225,45 @@ print_endpoints() {
   echo -e "${BLUE}\n🎉 Setup completed successfully — Powered by FZ_AAMIR ✨${NC}"
 }
 
+handle_choice() {
+  case "$1" in
+    1)
+      install_dependencies
+      install_docker
+      check_ports
+      create_directories
+      write_compose_file
+      start_services
+      monitor_sync
+      print_endpoints
+      ;;
+    2)
+      if [ -f "$BASE_DIR/docker-compose.yml" ]; then
+        cd "$BASE_DIR"
+        echo -e "${YELLOW}📜 Showing logs... Press Ctrl+C to exit.${NC}"
+        docker compose logs -f
+      else
+        echo -e "${RED}❌ No docker-compose.yml found. Please run installation first.${NC}"
+      fi
+      ;;
+    3)
+      echo -e "${CYAN}👋 Goodbye!${NC}"
+      exit 0
+      ;;
+    *)
+      echo -e "${RED}❌ Invalid choice. Please enter 1, 2, or 3.${NC}"
+      ;;
+  esac
+}
+
 main() {
-  print_banner
-  install_dependencies
-  install_docker
-  check_ports
-  create_directories
-  write_compose_file
-  start_services
-  monitor_sync
-  print_endpoints
+  while true; do
+    print_banner
+    read -r choice
+    handle_choice "$choice"
+    echo ""
+    read -rp "Press Enter to return to the menu..."
+  done
 }
 
 main
