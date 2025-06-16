@@ -12,14 +12,19 @@ NC="\033[0m"
 
 BASE_DIR="/opt/eth-rpc-node"
 JWT_PATH="$BASE_DIR/jwt.hex"
-IP_ADDR="$(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
+
+# Fetch IP safely
+IP_ADDR="$(curl -s ifconfig.me || true)"
+if [ -z "$IP_ADDR" ]; then
+  IP_ADDR="$(hostname -I | awk '{print $1}')"
+fi
 
 print_banner() {
   clear
   echo -e "${YELLOW}"
   echo "███████╗███████╗     █████╗      █████╗ ███╗   ███╗██╗██████╗ "
   echo "██╔════╝╚══███╔╝    ██╔══██╗    ██╔══██╗████╗ ████║██║██╔══██╗"
-  echo "█████╗    ███╔╝     ███████║    ███████║██╔████╔██║██║██████╔╝"
+  echo "█████╗    ███╔╝     ███████║    ███████║██║╔████╔██║██║██████╔╝"
   echo "██╔══╝   ███╔╝      ██╔══██║    ██╔══██║██║╚██╔╝██║██║██╔══██╗"
   echo "██║     ███████╗    ██║  ██║    ██║  ██║██║ ╚═╝ ██║██║██║  ██║"
   echo "╚═╝     ╚══════╝    ╚═╝  ╚═╝    ╚═╝  ╚═╝╚═╝     ╚═╝╚═╝╚═╝  ╚═╝"
@@ -37,7 +42,7 @@ print_banner() {
 install_dependencies() {
   echo -e "${YELLOW}🔧 Installing required packages...${NC}"
   apt update -y && apt upgrade -y
-  local packages=(curl jq net-tools iptables build-essential git wget lz4 make gcc nano automake autoconf tmux htop nvme-cli libgbm1 pkg-config libssl-dev libleveldb-dev tar clang bsdmainutils ncdu unzip ufw)
+  local packages=(curl jq net-tools iptables build-essential git wget lz4 make gcc nano automake autoconf tmux htop nvme-cli libgbm1 pkg-config libssl-dev libleveldb-dev tar clang bsdmainutils ncdu unzip ufw openssl)
   for pkg in "${packages[@]}"; do
     if ! dpkg -s "$pkg" >/dev/null 2>&1; then
       apt-get install -y "$pkg"
@@ -54,7 +59,8 @@ install_docker() {
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
     chmod a+r /etc/apt/keyrings/docker.gpg
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+      | tee /etc/apt/sources.list.d/docker.list > /dev/null
     apt-get update -y
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     systemctl enable docker
@@ -77,14 +83,9 @@ check_ports() {
 }
 
 create_directories() {
-  echo -e "${YELLOW}📁 Creating data directories...${NC}"
-  rm -rf "$BASE_DIR/execution" "$BASE_DIR/consensus"
+  echo -e "${YELLOW}📁 Preparing directories...${NC}"
   mkdir -p "$BASE_DIR/execution" "$BASE_DIR/consensus"
   rm -f "$JWT_PATH"
-  if ! command -v openssl >/dev/null 2>&1; then
-    echo -e "${RED}❌ OpenSSL not found. Aborting.${NC}"
-    exit 1
-  fi
   openssl rand -hex 32 > "$JWT_PATH"
   echo -e "${GREEN}✅ JWT secret created.${NC}"
 }
@@ -92,18 +93,13 @@ create_directories() {
 write_compose_file() {
   echo -e "${YELLOW}📝 Writing docker-compose.yml...${NC}"
   cat > "$BASE_DIR/docker-compose.yml" <<EOF
+version: '3.8'
 services:
   execution:
     image: ethereum/client-go:stable
     container_name: geth
     network_mode: host
     restart: unless-stopped
-    ports:
-      - 30303:30303
-      - 30303:30303/udp
-      - 8545:8545
-      - 8546:8546
-      - 8551:8551
     volumes:
       - ./execution:/data
       - ./jwt.hex:/data/jwt.hex
@@ -120,7 +116,7 @@ services:
       - --datadir=/data
 
   consensus:
-    image: gcr.io/prysmaticlabs/prysm/beacon-chain
+    image: gcr.io/prysmaticlabs/prysm/beacon-chain:stable
     container_name: prysm
     network_mode: host
     restart: unless-stopped
@@ -129,9 +125,6 @@ services:
     volumes:
       - ./consensus:/data
       - ./jwt.hex:/data/jwt.hex
-    ports:
-      - 4000:4000
-      - 3500:3500
     command:
       - --sepolia
       - --accept-terms-of-use
@@ -160,21 +153,22 @@ start_services() {
 monitor_sync() {
   echo -e "${CYAN}📡 Monitoring sync status...${NC}"
   while true; do
-    local geth_sync=$(curl -s -X POST -H "Content-Type: application/json" \
-      --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' http://$IP_ADDR:8545)
-    local prysm_sync=$(curl -s http://$IP_ADDR:3500/eth/v1/node/syncing)
+    echo "DEBUG: contacting http://$IP_ADDR:8545"
+    geth_sync=$(curl -s -X POST -H "Content-Type: application/json" \
+      --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' http://$IP_ADDR:8545 || echo "")
+    prysm_sync=$(curl -s http://$IP_ADDR:3500/eth/v1/node/syncing || echo "")
 
     if [[ "$geth_sync" == *"false"* ]]; then
       echo -e "${GREEN}✅ Geth fully synced.${NC}"
     else
-      local current=$(echo "$geth_sync" | jq -r .result.currentBlock)
-      local highest=$(echo "$geth_sync" | jq -r .result.highestBlock)
-      local percent=$(awk "BEGIN {printf \"%.2f\", (0x${current}/0x${highest})*100}")
+      current=$(echo "$geth_sync" | jq -r .result.currentBlock)
+      highest=$(echo "$geth_sync" | jq -r .result.highestBlock)
+      percent=$(awk "BEGIN {printf \"%.2f\", (0x${current}/0x${highest})*100}")
       echo -e "${YELLOW}🔄 Geth syncing: Block $current of $highest (~$percent%)${NC}"
     fi
 
-    local distance=$(echo "$prysm_sync" | jq -r '.data.sync_distance')
-    local head=$(echo "$prysm_sync" | jq -r '.data.head_slot')
+    distance=$(echo "$prysm_sync" | jq -r '.data.sync_distance' 2>/dev/null || echo "")
+    head=$(echo "$prysm_sync" | jq -r '.data.head_slot' 2>/dev/null || echo "")
 
     if [[ "$distance" == "0" ]]; then
       echo -e "${GREEN}✅ Prysm fully synced.${NC}"
@@ -196,20 +190,21 @@ print_endpoints() {
 
 check_node_status() {
   echo -e "${CYAN}🔍 Checking Ethereum Sepolia node status...${NC}"
-  local geth_sync=$(curl -s -X POST -H "Content-Type: application/json" \
-    --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' http://$IP_ADDR:8545)
-  local prysm_sync=$(curl -s http://$IP_ADDR:3500/eth/v1/node/syncing)
-  echo ""
+  geth_sync=$(curl -s -X POST -H "Content-Type: application/json" \
+    --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' http://$IP_ADDR:8545 || echo "")
+  prysm_sync=$(curl -s http://$IP_ADDR:3500/eth/v1/node/syncing || echo "")
+
   if [[ "$geth_sync" == *"false"* ]]; then
     echo -e "✅ ${GREEN}Geth (Execution Layer) is fully synced.${NC}"
   else
-    local current=$(echo "$geth_sync" | jq -r .result.currentBlock)
-    local highest=$(echo "$geth_sync" | jq -r .result.highestBlock)
-    local percent=$(awk "BEGIN {printf \"%.2f\", (0x${current}/0x${highest})*100}")
+    current=$(echo "$geth_sync" | jq -r .result.currentBlock)
+    highest=$(echo "$geth_sync" | jq -r .result.highestBlock)
+    percent=$(awk "BEGIN {printf \"%.2f\", (0x${current}/0x${highest})*100}")
     echo -e "🔄 ${YELLOW}Geth is syncing: Block $current of $highest (~$percent%)${NC}"
   fi
-  local distance=$(echo "$prysm_sync" | jq -r '.data.sync_distance')
-  local head=$(echo "$prysm_sync" | jq -r '.data.head_slot')
+
+  distance=$(echo "$prysm_sync" | jq -r '.data.sync_distance' 2>/dev/null || echo "")
+  head=$(echo "$prysm_sync" | jq -r '.data.head_slot' 2>/dev/null || echo "")
   if [[ "$distance" == "0" ]]; then
     echo -e "✅ ${GREEN}Prysm (Consensus Layer) is fully synced.${NC}"
   else
