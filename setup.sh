@@ -245,39 +245,38 @@ print_endpoints() {
 }
 
 check_node_status() {
-  echo -e "${CYAN}🔍 Checking Ethereum Sepolia node status...${NC}"
-  local geth_status=$(docker inspect --format='{{.State.Health.Status}}' geth 2>/dev/null || echo "unknown")
-  local prysm_status=$(docker inspect --format='{{.State.Health.Status}}' prysm 2>/dev/null || echo "unknown")
-  if [[ "$geth_status" == "healthy" ]]; then
-    echo -e "✅ ${GREEN}Geth (Execution) container is healthy.${NC}"
-  else
-    echo -e "❌ ${RED}Geth (Execution) container — $geth_status${NC}"
-  fi
-  if [[ "$prysm_status" == "healthy" ]]; then
-    echo -e "✅ ${GREEN}Prysm (Consensus) container is healthy.${NC}"
-  else
-    echo -e "❌ ${RED}Prysm (Consensus) container — $prysm_status${NC}"
-  fi
-  geth_sync=$(curl -s -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' http://127.0.0.1:$EXECUTION_RPC || true)
-  if [[ "$geth_sync" == *"false"* ]]; then
-    echo -e "✅ ${GREEN}Geth (Execution) is fully synced.${NC}"
-  else
-    current=$(get_json_field "$geth_sync" ".result.currentBlock")
-    highest=$(get_json_field "$geth_sync" ".result.highestBlock")
-    current_dec=$((current))
-    highest_dec=$((highest))
-    percent=$(awk "BEGIN {printf \"%.2f\", ($current_dec/$highest_dec)*100}")
-    echo -e "🔄 ${YELLOW}Geth syncing: $current_dec / $highest_dec (~$percent%)${NC}"
-  fi
-  prysm_sync=$(curl -s http://127.0.0.1:$CONSENSUS_RPC/eth/v1/node/syncing || true)
-  distance=$(get_json_field "$prysm_sync" ".data.sync_distance")
-  head=$(get_json_field "$prysm_sync" ".data.head_slot")
-  if [[ "$distance" == "0" ]]; then
-    echo -e "✅ ${GREEN}Prysm (Consensus) is fully synced.${NC}"
-  else
-    echo -e "🔄 ${YELLOW}Prysm syncing: $distance slots behind (head: $head)${NC}"
-  fi
+  echo -e "${CYAN}📡 Live Ethereum Sepolia Node Status (refreshing every 10s, Ctrl+C to exit)...${NC}"
+  while true; do
+    clear
+    echo -e "${CYAN}🔍 Checking Ethereum Sepolia node status...${NC}\n"
+    geth_sync=$(curl -s -X POST -H "Content-Type: application/json" \
+      --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' \
+      http://127.0.0.1:$EXECUTION_RPC || true)
+
+    if [[ "$geth_sync" == *"false"* ]]; then
+      echo -e "✅ ${GREEN}Geth (Execution) is fully synced.${NC}"
+    else
+      current=$(get_json_field "$geth_sync" ".result.currentBlock")
+      highest=$(get_json_field "$geth_sync" ".result.highestBlock")
+      current_dec=$((current))
+      highest_dec=$((highest))
+      percent=$(awk "BEGIN {printf \"%.2f\", ($current_dec/$highest_dec)*100}")
+      echo -e "🔄 ${YELLOW}Geth syncing: $current_dec / $highest_dec (~$percent%)${NC}"
+    fi
+
+    prysm_sync=$(curl -s http://127.0.0.1:$CONSENSUS_RPC/eth/v1/node/syncing || true)
+    distance=$(get_json_field "$prysm_sync" ".data.sync_distance")
+    head=$(get_json_field "$prysm_sync" ".data.head_slot")
+    if [[ "$distance" == "0" ]]; then
+      echo -e "✅ ${GREEN}Prysm (Consensus) is fully synced.${NC}"
+    else
+      echo -e "🔄 ${YELLOW}Prysm syncing: $distance slots behind (head: $head)${NC}"
+    fi
+
+    sleep 10
+  done
 }
+
 
 handle_choice() {
   case "$1" in
