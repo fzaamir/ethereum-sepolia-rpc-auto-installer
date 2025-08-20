@@ -1,20 +1,21 @@
 #!/bin/bash
 
 set -euo pipefail
-trap 'echo -e "\033[1;31m❌ Error occurred at line $LINENO. Exiting.\033[0m"' ERR
+trap 'echo -e "\033[1;31m❌ Error at line $LINENO. Exiting.\033[0m"' ERR
 
-GREEN="\033[1;32m"
-BLUE="\033[1;34m"
-YELLOW="\033[1;33m"
-CYAN="\033[1;36m"
-RED="\033[1;31m"
-NC="\033[0m"
+# Colors
+GREEN="\033[1;32m"; BLUE="\033[1;34m"; YELLOW="\033[1;33m"; CYAN="\033[1;36m"; RED="\033[1;31m"; NC="\033[0m"
 
 BASE_DIR="/opt/eth-rpc-node"
 JWT_PATH="$BASE_DIR/jwt.hex"
+LOG_FILE="$BASE_DIR/node_setup.log"
 
-# Fetch IP safely
-IP_ADDR="$(curl -s ifconfig.me || true)"
+# Ensure log dir
+mkdir -p "$BASE_DIR"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+# Fetch IP (safe fallback)
+IP_ADDR="$(curl -s --max-time 5 ifconfig.me || true)"
 if [ -z "$IP_ADDR" ]; then
   IP_ADDR="$(hostname -I | awk '{print $1}')"
 fi
@@ -42,7 +43,7 @@ print_banner() {
 install_dependencies() {
   echo -e "${YELLOW}🔧 Installing required packages...${NC}"
   apt update -y && apt upgrade -y
-  local packages=(curl jq net-tools iptables build-essential git wget lz4 make gcc nano automake autoconf tmux htop nvme-cli libgbm1 pkg-config libssl-dev libleveldb-dev tar clang bsdmainutils ncdu unzip ufw openssl)
+  local packages=(curl jq net-tools iproute2 iptables build-essential git wget lz4 make gcc nano automake autoconf tmux htop nvme-cli libgbm1 pkg-config libssl-dev libleveldb-dev tar clang bsdmainutils ncdu unzip ufw openssl)
   for pkg in "${packages[@]}"; do
     if ! dpkg -s "$pkg" >/dev/null 2>&1; then
       apt-get install -y "$pkg"
@@ -74,9 +75,9 @@ install_docker() {
 check_ports() {
   echo -e "${YELLOW}🕵️ Checking port availability...${NC}"
   local conflicts
-  conflicts=$(netstat -tuln | grep -E '30303|8545|8546|8551|4000|3500' || true)
+  conflicts=$(ss -tulpen | grep -E '30303|8545|8546|8551|4000|3500' || true)
   if [ -n "$conflicts" ]; then
-    echo -e "${RED}❌ Ports in use. Please resolve conflicts:\n$conflicts${NC}"
+    echo -e "${RED}❌ Ports in use:\n$conflicts${NC}"
     exit 1
   fi
   echo -e "${GREEN}✅ Required ports are free.${NC}"
@@ -131,7 +132,7 @@ services:
       - --datadir=/data
       - --disable-monitoring
       - --rpc-host=0.0.0.0
-      - --execution-endpoint=http://$IP_ADDR:8551
+      - --execution-endpoint=http://127.0.0.1:8551
       - --jwt-secret=/data/jwt.hex
       - --rpc-port=4000
       - --grpc-gateway-host=0.0.0.0
@@ -153,23 +154,26 @@ start_services() {
 monitor_sync() {
   echo -e "${CYAN}📡 Monitoring sync status...${NC}"
   while true; do
-    echo "DEBUG: contacting http://$IP_ADDR:8545"
     geth_sync=$(curl -s -X POST -H "Content-Type: application/json" \
-      --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' http://$IP_ADDR:8545 || echo "")
-    prysm_sync=$(curl -s http://$IP_ADDR:3500/eth/v1/node/syncing || echo "")
+      --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' http://127.0.0.1:8545 || true)
 
     if [[ "$geth_sync" == *"false"* ]]; then
       echo -e "${GREEN}✅ Geth fully synced.${NC}"
     else
-      current=$(echo "$geth_sync" | jq -r .result.currentBlock)
-      highest=$(echo "$geth_sync" | jq -r .result.highestBlock)
-      percent=$(awk "BEGIN {printf \"%.2f\", (0x${current}/0x${highest})*100}")
-      echo -e "${YELLOW}🔄 Geth syncing: Block $current of $highest (~$percent%)${NC}"
+      current=$(echo "$geth_sync" | jq -r .result.currentBlock 2>/dev/null || echo "0")
+      highest=$(echo "$geth_sync" | jq -r .result.highestBlock 2>/dev/null || echo "0")
+      # Convert hex safely
+      current_dec=$((current))
+      highest_dec=$((highest))
+      if [ "$highest_dec" -gt 0 ]; then
+        percent=$(awk "BEGIN {printf \"%.2f\", ($current_dec/$highest_dec)*100}")
+        echo -e "${YELLOW}🔄 Geth syncing: $current_dec / $highest_dec (~$percent%)${NC}"
+      fi
     fi
 
+    prysm_sync=$(curl -s http://127.0.0.1:3500/eth/v1/node/syncing || true)
     distance=$(echo "$prysm_sync" | jq -r '.data.sync_distance' 2>/dev/null || echo "")
     head=$(echo "$prysm_sync" | jq -r '.data.head_slot' 2>/dev/null || echo "")
-
     if [[ "$distance" == "0" ]]; then
       echo -e "${GREEN}✅ Prysm fully synced.${NC}"
     else
@@ -191,59 +195,36 @@ print_endpoints() {
 check_node_status() {
   echo -e "${CYAN}🔍 Checking Ethereum Sepolia node status...${NC}"
   geth_sync=$(curl -s -X POST -H "Content-Type: application/json" \
-    --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' http://$IP_ADDR:8545 || echo "")
-  prysm_sync=$(curl -s http://$IP_ADDR:3500/eth/v1/node/syncing || echo "")
+    --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' http://127.0.0.1:8545 || true)
 
   if [[ "$geth_sync" == *"false"* ]]; then
-    echo -e "✅ ${GREEN}Geth (Execution Layer) is fully synced.${NC}"
+    echo -e "✅ ${GREEN}Geth (Execution) is fully synced.${NC}"
   else
     current=$(echo "$geth_sync" | jq -r .result.currentBlock)
     highest=$(echo "$geth_sync" | jq -r .result.highestBlock)
-    percent=$(awk "BEGIN {printf \"%.2f\", (0x${current}/0x${highest})*100}")
-    echo -e "🔄 ${YELLOW}Geth is syncing: Block $current of $highest (~$percent%)${NC}"
+    current_dec=$((current))
+    highest_dec=$((highest))
+    percent=$(awk "BEGIN {printf \"%.2f\", ($current_dec/$highest_dec)*100}")
+    echo -e "🔄 ${YELLOW}Geth syncing: $current_dec / $highest_dec (~$percent%)${NC}"
   fi
 
+  prysm_sync=$(curl -s http://127.0.0.1:3500/eth/v1/node/syncing || true)
   distance=$(echo "$prysm_sync" | jq -r '.data.sync_distance' 2>/dev/null || echo "")
   head=$(echo "$prysm_sync" | jq -r '.data.head_slot' 2>/dev/null || echo "")
   if [[ "$distance" == "0" ]]; then
-    echo -e "✅ ${GREEN}Prysm (Consensus Layer) is fully synced.${NC}"
+    echo -e "✅ ${GREEN}Prysm (Consensus) is fully synced.${NC}"
   else
-    echo -e "🔄 ${YELLOW}Prysm is syncing: $distance slots behind (head: $head)${NC}"
+    echo -e "🔄 ${YELLOW}Prysm syncing: $distance slots behind (head: $head)${NC}"
   fi
-  echo ""
 }
 
 handle_choice() {
   case "$1" in
-    1)
-      install_dependencies
-      install_docker
-      check_ports
-      create_directories
-      write_compose_file
-      start_services
-      monitor_sync
-      print_endpoints
-      ;;
-    2)
-      if [ -f "$BASE_DIR/docker-compose.yml" ]; then
-        cd "$BASE_DIR"
-        echo -e "${YELLOW}📜 Showing logs... Ctrl+C to exit.${NC}"
-        docker compose logs -f
-      else
-        echo -e "${RED}❌ No docker-compose.yml found. Please run installation first.${NC}"
-      fi
-      ;;
-    3)
-      check_node_status
-      ;;
-    4)
-      echo -e "${CYAN}👋 Goodbye!${NC}"
-      exit 0
-      ;;
-    *)
-      echo -e "${RED}❌ Invalid input. Enter 1, 2, 3, or 4.${NC}"
-      ;;
+    1) install_dependencies; install_docker; check_ports; create_directories; write_compose_file; start_services; monitor_sync; print_endpoints ;;
+    2) [ -f "$BASE_DIR/docker-compose.yml" ] && cd "$BASE_DIR" && docker compose logs -f || echo -e "${RED}❌ No docker-compose.yml found.${NC}" ;;
+    3) check_node_status ;;
+    4) echo -e "${CYAN}👋 Goodbye!${NC}"; exit 0 ;;
+    *) echo -e "${RED}❌ Invalid input.${NC}" ;;
   esac
 }
 
